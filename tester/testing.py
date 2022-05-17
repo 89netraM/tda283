@@ -27,6 +27,7 @@
 #         --x86               Test the 32-bit x86 backend
 #         --x64               Test the 64-bit x86 backend
 #         --riscv             Test the RISC-V backend
+#         --wasm              Test the WASM backend
 #     -x <ext> [ext ...]      Test one or more extensions
 #         --noclean           Do not clean up temporary files
 #
@@ -36,7 +37,7 @@
 #
 #     > ./testing.py partC-1.tar.gz --x86 -x arrays1 pointers
 #
-#   If neither of the options '--llvm', '--x86', '--x64', or '--riscv'
+#   If neither of the options '--llvm', '--x86', '--x64', '--riscv', or '--wasm'
 #   are present, only parsing and type checking is tested.
 #
 # EXTENSIONS
@@ -81,7 +82,7 @@
 #   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 #   Your compiler should be named `jlc` (without quotes) for the LLVM backend,
 #   `jlc_x86` for the 32-bit x86 backend, `jlc_x64` for the 64-bit x86 backend,
-#   and `jlc_riscv` for the RISC-V backend.
+#   `jlc_riscv` for the RISC-V backend, and `jlc_wasm` for the WASM backend.
 #
 #   Input/output format
 #   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -211,6 +212,21 @@ def link_riscv(path, source_str):
         os.close(fds)
         os.close(fdo)
         clean_files([tmp_s, tmp_o])
+
+##
+## Assemble files with wat2wasm for WASM.
+##
+def link_wasm(path, source_str):
+    fd, tmp = tempfile.mkstemp(
+            prefix='test_wasm_', suffix='.wat', dir=os.getcwd())
+
+    try:
+        with open(tmp, 'w+') as f:
+            f.write(source_str)
+        run_command('wat2wasm', [tmp, '-o', 'a.out'])
+    finally:
+        os.close(fd)
+        clean_files([tmp])
 
 ##
 ## Compile a Javalette source file with the Javalette compiler.
@@ -363,6 +379,10 @@ def init_argparser():
             action="store_true",
             help="test RISC-V backend")
     parser.add_argument(
+            "--wasm",
+            action="store_true",
+            help="test WASM backend")
+    parser.add_argument(
             "-x",
             metavar="<ext>",
             nargs="+",
@@ -471,6 +491,11 @@ def check_build(path, prefix, backends):
                 raise TestingException(
                         "\"runtime-riscv.s\" is missing from \"lib\"")
             run_command('riscv64-none-elf-gcc', ['-c', runtime + '-riscv.s', '-o' + runtime + '-riscv.o'])
+        elif suff == 'wasm':
+            if not os.path.isfile(runtime + '-wasm.mjs'):
+                print("Failed.")
+                raise TestingException(
+                        "\"runtime-wasm.mjs\" is missing from \"lib\"")
         elif suff == 'x86' or suff == 'x64':
             if not os.path.isfile(runtime + '.s'):
                 print("Failed.")
@@ -545,6 +570,9 @@ def run_tests(path, backends, prefix, exts):
             elif suffix == "riscv":
                 linker = lambda s: link_riscv(path, s)
                 runner = ['spike', which('pk')]
+            elif suffix == "wasm":
+                linker = lambda s: link_wasm(path, s)
+                runner = ['node', os.path.join(path, 'lib', 'runtime-wasm.mjs')]
             elif suffix == "x86":
                 linker = lambda s: link_x86(path, s, False, link_macho)
                 runner = None
@@ -641,6 +669,8 @@ def main():
         backends.append("x64")
     if ns.riscv:
         backends.append("riscv")
+    if ns.wasm:
+        backends.append("wasm")
 
     did_unpack = False
     failure = False
